@@ -313,7 +313,7 @@ class ServableMixin:
         """
         Callback to handle FunctionHandler document creation.
         """
-        if server_id:
+        if server_id and server_id in state._servers:
             state._servers[server_id][2].append(doc)
         return self.server_doc(doc, title, location) # type: ignore
 
@@ -1093,7 +1093,7 @@ class Child(param.ClassSelector):
     ):
         ...
 
-    def __init__(self, /, default=Undefined, class_=Viewable, **params):
+    def __init__(self, /, default=Undefined, class_=Viewable, allow_refs=False, **params):
         if isinstance(class_, type) and not issubclass(class_, Viewable):
             raise TypeError(
                 f"Child.class_ must be an instance of Viewable, not {type(class_)}."
@@ -1103,7 +1103,10 @@ class Child(param.ClassSelector):
             raise TypeError(
                 f"Child.class_ must be an instance of Viewable, not {invalid}."
             )
-        super().__init__(default=self._transform_value(default), class_=class_, **params)
+        super().__init__(
+            default=self._transform_value(default), class_=class_,
+            allow_refs=allow_refs, **params
+        )
 
     def _transform_value(self, val):
         if not isinstance(val, Viewable) and val not in (None, Undefined):

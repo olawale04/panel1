@@ -8,7 +8,6 @@ from typing import (
 )
 
 import numpy as np
-import pandas as pd
 import param
 
 from bokeh.models import ColumnDataSource
@@ -27,6 +26,7 @@ def ds_as_cds(dataset):
     """
     Converts Vega dataset into Bokeh ColumnDataSource data
     """
+    import pandas as pd
     if isinstance(dataset, pd.DataFrame):
         return {k: dataset[k].values for k in dataset.columns}
     if len(dataset) == 0:
@@ -267,7 +267,7 @@ class Vega(ModelPane):
         data = props['data']
         if data is not None:
             sources = self._get_sources(data, sources)
-        if self.sizing_mode:
+        if self.sizing_mode and data:
             if 'both' in self.sizing_mode:
                 if 'width' in data:
                     data['width'] = 'container'

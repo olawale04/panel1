@@ -7,6 +7,7 @@ import asyncio
 import datetime as dt
 import inspect
 import logging
+import os
 import shutil
 import sys
 import threading
@@ -14,7 +15,7 @@ import time
 
 from collections import Counter, defaultdict
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from functools import partial, wraps
 from typing import (
@@ -65,7 +66,9 @@ def set_curdoc(doc: Document):
     try:
         yield
     finally:
-        state._curdoc.reset(token)
+        # If _curdoc has been reset it will raise a ValueError
+        with suppress(ValueError):
+            state._curdoc.reset(token)
 
 def curdoc_locked() -> Document:
     try:
@@ -146,9 +149,9 @@ class _state(param.Parameterized):
     _location: ClassVar[Location | None] = None # Global location, e.g. for notebook context
     _locations: ClassVar[WeakKeyDictionary[Document, Location]] = WeakKeyDictionary() # Server locations indexed by document
 
-    # Locations
+    # Notifications
     _notification: ClassVar[NotificationArea | None] = None # Global location, e.g. for notebook context
-    _notifications: ClassVar[WeakKeyDictionary[Document, NotificationArea]] = WeakKeyDictionary() # Server locations indexed by document
+    _notifications: ClassVar[WeakKeyDictionary[Document, NotificationArea]] = WeakKeyDictionary() # Server notifications indexed by document
 
     # Templates
     _template: ClassVar[BaseTemplate | None] = None
@@ -173,9 +176,9 @@ class _state(param.Parameterized):
 
     # Dictionary of callbacks to be triggered on app load
     _onload: ClassVar[dict[Document, Callable[[], None]]] = WeakKeyDictionary()
-    _on_session_created: ClassVar[list[Callable[[BokehSessionContext], []]]] = []
-    _on_session_created_internal: ClassVar[list[Callable[[BokehSessionContext], []]]] = []
-    _on_session_destroyed: ClassVar[list[Callable[[BokehSessionContext], []]]] = []
+    _on_session_created: ClassVar[list[Callable[[BokehSessionContext], None]]] = []
+    _on_session_created_internal: ClassVar[list[Callable[[BokehSessionContext], None]]] = []
+    _on_session_destroyed: ClassVar[list[Callable[[BokehSessionContext], None]]] = []
     _loaded: ClassVar[WeakKeyDictionary[Document, bool]] = WeakKeyDictionary()
 
     # Module that was run during setup
@@ -216,6 +219,9 @@ class _state(param.Parameterized):
     # Override user info
     _oauth_user_overrides = {}
     _active_users = Counter()
+
+    # Watchers
+    _watch_events: list[asyncio.Event] = []
 
     def __repr__(self) -> str:
         server_info = []
@@ -599,7 +605,7 @@ class _state(param.Parameterized):
 
     def execute(
         self,
-        callback: Callable([], None),
+        callback: Callable[[], None],
         schedule: bool | Literal['auto', 'thread'] = 'auto'
     ) -> None:
         """
@@ -769,6 +775,7 @@ class _state(param.Parameterized):
         any other state held by the server.
         """
         self.kill_all_servers()
+        self._curdoc = ContextVar('curdoc', default=None)
         self._indicators.clear()
         self._location = None
         self._locations.clear()
@@ -784,6 +791,9 @@ class _state(param.Parameterized):
         self._session_key_funcs.clear()
         self._on_session_created.clear()
         self._on_session_destroyed.clear()
+        self._stylesheets.clear()
+        self._scheduled.clear()
+        self._periodic.clear()
 
     def schedule_task(
         self, name: str, callback: Callable[[], None], at: Tat =None,
@@ -840,6 +850,7 @@ class _state(param.Parameterized):
           Whether the callback should be run on a thread (requires
           config.nthreads to be set).
         """
+        name = f"{os.getpid()}_{name}"
         if name in self._scheduled:
             if callback is not self._scheduled[name][1]:
                 self.param.warning(
@@ -868,7 +879,7 @@ class _state(param.Parameterized):
                         yield new.timestamp()
                 elif callable(at):
                     while True:
-                        new = at(dt.datetime.utcnow())
+                        new = at(dt.datetime.now(dt.timezone.utc).replace(tzinfo=None))
                         if new is None:
                             raise StopIteration
                         yield new.replace(tzinfo=dt.timezone.utc).astimezone().timestamp()
@@ -1043,20 +1054,25 @@ class _state(param.Parameterized):
 
     @property
     def notifications(self) -> NotificationArea | None:
-        from ..config import config
-        if config.notifications and self.curdoc and self.curdoc.session_context and self.curdoc not in self._notifications:
-            from .notifications import NotificationArea
-            js_events = {}
-            if config.ready_notification:
-                js_events['document_ready'] = {'type': 'success', 'message': config.ready_notification, 'duration': 3000}
-            if config.disconnect_notification:
-                js_events['connection_lost'] = {'type': 'error', 'message': config.disconnect_notification}
-            self._notifications[self.curdoc] = notifications = NotificationArea(js_events=js_events)
-            return notifications
-        elif self.curdoc is None or self.curdoc.session_context is None:
+        if self.curdoc is None:
             return self._notification
-        else:
-            return self._notifications.get(self.curdoc) if self.curdoc else None
+
+        is_session = (self.curdoc.session_context is not None or self._is_pyodide)
+        if self.curdoc in self._notifications:
+            return self._notifications[self.curdoc]
+
+        from panel.config import config
+        if not (config.notifications and is_session):
+            return None if is_session else self._notification
+
+        from panel.io.notifications import NotificationArea
+        js_events = {}
+        if config.ready_notification:
+            js_events['document_ready'] = {'type': 'success', 'message': config.ready_notification, 'duration': 3000}
+        if config.disconnect_notification:
+            js_events['connection_lost'] = {'type': 'error', 'message': config.disconnect_notification}
+        self._notifications[self.curdoc] = notifications = NotificationArea(js_events=js_events)
+        return notifications
 
     @property
     def refresh_token(self) -> str | None:

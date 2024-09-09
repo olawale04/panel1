@@ -103,7 +103,7 @@ class Widget(Reactive, WidgetBase):
 
     __abstract = True
 
-    def __init__(self, **params):
+    def __init__(self, **params: Any):
         if 'name' not in params:
             params['name'] = ''
         if '_supports_embed' in params:
@@ -251,7 +251,7 @@ class CompositeWidget(Widget):
         parent: Optional[Model] = None, comm: Optional[Comm] = None
     ) -> Model:
         model = self._composite._get_model(doc, root, parent, comm)
-        root = root or model
+        root = model if root is None else root
         self._models[root.ref['id']] = (model, parent)
         return model
 

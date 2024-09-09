@@ -50,6 +50,7 @@ ASSISTANT_LOGO = "🤖"
 SYSTEM_LOGO = "⚙️"
 ERROR_LOGO = "❌"
 HELP_LOGO = "❓"
+INPUT_LOGO = "❗"
 GPT_3_LOGO = "{dist_path}assets/logo/gpt-3.svg"
 GPT_4_LOGO = "{dist_path}assets/logo/gpt-4.svg"
 WOLFRAM_LOGO = "{dist_path}assets/logo/wolfram.svg"
@@ -79,6 +80,7 @@ DEFAULT_AVATARS = {
     "exception": ERROR_LOGO,
     "error": ERROR_LOGO,
     "help": HELP_LOGO,
+    "input": INPUT_LOGO,
     # Human
     "adult": "🧑",
     "baby": "👶",
@@ -179,7 +181,7 @@ class ChatMessage(Pane):
     header_objects = param.List(doc="""
         A list of objects to display in the row of the header of the message.""")
 
-    max_width = param.Integer(default=1200, bounds=(0, None))
+    max_width = param.Integer(default=1200, bounds=(0, None), allow_None=True)
 
     object = param.Parameter(allow_refs=False, doc="""
         The message contents. Can be any Python object that panel can display.""")
@@ -252,7 +254,7 @@ class ChatMessage(Pane):
 
         reaction_icons = params.get("reaction_icons", {"favorite": "heart"})
         if isinstance(reaction_icons, dict):
-            params["reaction_icons"] = ChatReactionIcons(options=reaction_icons)
+            params["reaction_icons"] = ChatReactionIcons(options=reaction_icons, default_layout=Row, sizing_mode=None)
         self._internal = True
         super().__init__(object=object, **params)
         self.chat_copy_icon = ChatCopyIcon(
@@ -264,20 +266,16 @@ class ChatMessage(Pane):
         self._build_layout()
 
     def _build_layout(self):
-        self._activity_dot = HTML(
-            "●",
-            css_classes=["activity-dot"],
-            visible=self.param.show_activity_dot,
-            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
-        )
+        self._icon_divider = HTML(" | ", width=1, css_classes=["divider"])
+
         self._left_col = left_col = Column(
             self._render_avatar(),
             max_width=60,
             height=100,
             css_classes=["left"],
-            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
             visible=self.param.show_avatar,
             sizing_mode=None,
+            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
         )
         self.param.watch(self._update_avatar_pane, "avatar")
 
@@ -285,7 +283,6 @@ class ChatMessage(Pane):
         self._update_chat_copy_icon()
         self._center_row = Row(
             self._object_panel,
-            self._render_reaction_icons(),
             css_classes=["center"],
             stylesheets=self._stylesheets + self.param.stylesheets.rx(),
             sizing_mode=None
@@ -294,42 +291,66 @@ class ChatMessage(Pane):
         self.param.watch(self._update_reaction_icons, "reaction_icons")
 
         self._user_html = HTML(
-            self.param.user, height=20, css_classes=["name"],
-            visible=self.param.show_user, stylesheets=self._stylesheets,
+            self.param.user, height=20,
+            css_classes=["name"],
+            visible=self.param.show_user,
+            sizing_mode=None,
         )
 
-        header_objects = (
-            [self._user_html] +
-            self.param.header_objects.rx() +
-            [self.chat_copy_icon, self._activity_dot]
+        self._activity_dot = HTML(
+            "●",
+            css_classes=["activity-dot"],
+            margin=(5, 0),
+            sizing_mode=None,
+            visible=self.param.show_activity_dot,
         )
-        header_row = Row(
-            objects=header_objects,
+
+        meta_row = Row(
+            self._user_html,
+            self._activity_dot,
+            css_classes=["meta"],
             stylesheets=self._stylesheets + self.param.stylesheets.rx(),
+        )
+
+        header_col = Column(
+            objects=self.param.header_objects.rx(),
             sizing_mode="stretch_width",
-            css_classes=["header"]
+            css_classes=["header"],
+            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
+        )
+
+        footer_col = Column(
+            objects=self.param.footer_objects.rx(),
+            sizing_mode="stretch_width",
+            css_classes=["footer"],
+            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
         )
 
         self._timestamp_html = HTML(
             self.param.timestamp.rx().strftime(self.param.timestamp_format),
             css_classes=["timestamp"],
-            visible=self.param.show_timestamp
+            visible=self.param.show_timestamp,
         )
 
-        footer_col = Column(
-            objects=self.param.footer_objects.rx() + [self._timestamp_html],
-            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
+        self._icons_row = Row(
+            self.chat_copy_icon,
+            self._icon_divider,
+            self._render_reaction_icons(),
+            css_classes=["icons"],
             sizing_mode="stretch_width",
-            css_classes=["footer"],
+            stylesheets=self._stylesheets + self.param.stylesheets.rx(),
         )
 
         self._right_col = right_col = Column(
-            header_row,
+            meta_row,
+            header_col,
             self._center_row,
             footer_col,
+            self._icons_row,
+            self._timestamp_html,
             css_classes=["right"],
+            sizing_mode=None,
             stylesheets=self._stylesheets + self.param.stylesheets.rx(),
-            sizing_mode=None
         )
         viewable_params = {
             p: self.param[p] for p in self.param if p in Viewable.param
@@ -487,7 +508,7 @@ class ChatMessage(Pane):
                 pass
         else:
             if isinstance(old, Markdown) and isinstance(value, str):
-                self._set_params(old, object=value)
+                self._set_params(old, enable_streaming=True, object=value)
                 return old
             object_panel = _panel(value)
 
@@ -536,7 +557,12 @@ class ChatMessage(Pane):
         return reaction_icons
 
     def _update_reaction_icons(self, _):
-        self._center_row[1] = self._render_reaction_icons()
+        self._icons_row[-1] = self._render_reaction_icons()
+        self._icon_divider.visible = (
+            len(self.reaction_icons.options) > 0 and
+            self.show_reaction_icons and
+            self.chat_copy_icon.visible
+        )
 
     def _update(self, ref, old_models):
         """
@@ -579,9 +605,14 @@ class ChatMessage(Pane):
         if isinstance(object_panel, str) and self.show_copy_icon:
             self.chat_copy_icon.value = object_panel
             self.chat_copy_icon.visible = True
+            self._icon_divider.visible = (
+                len(self.reaction_icons.options) > 0 and
+                self.show_reaction_icons
+            )
         else:
             self.chat_copy_icon.value = ""
             self.chat_copy_icon.visible = False
+            self._icon_divider.visible = False
 
     def _cleanup(self, root=None) -> None:
         """
@@ -632,6 +663,11 @@ class ChatMessage(Pane):
                 updates["user"] = user
             if avatar:
                 updates["avatar"] = avatar
+            if "value" in updates and "object" in updates:
+                raise ValueError(
+                    "Cannot set both 'value' and 'object' in the update dict."
+                )
+            updates["object"] = updates.pop("value", updates.get("object"))
         elif isinstance(value, ChatMessage):
             if user is not None or avatar is not None:
                 raise ValueError(

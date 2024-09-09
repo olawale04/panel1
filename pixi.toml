@@ -16,23 +16,27 @@ test-311 = ["py311", "test-core", "test", "example", "test-example", "test-unit-
 test-312 = ["py312", "test-core", "test", "example", "test-example", "test-unit-task"]
 test-ui = ["py312", "test-core", "test", "test-ui"]
 test-core = ["py312", "test-core", "test-unit-task"]
+test-type = ["py311", "type"]
 docs = ["py311", "example", "doc"]
 build = ["py311", "build"]
 lint = ["py311", "lint"]
+lite = ["py311", "lite"]
 
 [dependencies]
+nodejs = ">=18"
+nomkl = "*"
+pip = "*"
+# Required
 bleach = "*"
 bokeh = ">=3.5.0,<3.6.0"
 linkify-it-py = "*"
 markdown = "*"
 markdown-it-py = "*"
 mdit-py-plugins = "*"
-nodejs = "*"
-numpy = "<2.0" # Temporary pin until panel release with support for bokeh 3.5.0 is available
+numpy = "*"
 packaging = "*"
 pandas = ">=1.2"
 param = ">=2.1.0,<3.0"
-pip = "*"
 pyviz_comms = ">=2.0.0"
 requests = "*"
 tqdm = ">=4.48.0"
@@ -108,6 +112,7 @@ pytest-xdist = "*"
 altair = "*"
 anywidget = "*"
 diskcache = "*"
+fastapi = "*"
 folium = "*"
 ipympl = "*"
 ipyvuetify = "*"
@@ -116,6 +121,9 @@ numba = "*"
 reacton = "*"
 scipy = "*"
 textual = "*"
+
+[feature.test.pypi-dependencies]
+bokeh-fastapi = "~=0.1.0a0"
 
 [feature.test-unit-task.tasks] # So it is not showing up in the test-ui environment
 test-unit = 'pytest panel/tests -n logical --dist loadgroup'
@@ -134,7 +142,10 @@ channels = ["pyviz/label/dev", "bokeh", "microsoft", "conda-forge"]
 [feature.test-ui.dependencies]
 playwright = { version = "*", channel = "microsoft" }
 pytest-playwright = "*"
+pytest-asyncio = "*"
 jupyter_server = "*"
+esbuild = "*"
+packaging = "*"
 
 [feature.test-ui.tasks]
 _install-ui = 'playwright install chromium'
@@ -142,6 +153,23 @@ _install-ui = 'playwright install chromium'
 [feature.test-ui.tasks.test-ui]
 cmd = 'pytest panel/tests/ui --ui --browser chromium -n logical --dist loadgroup --reruns 3 --reruns-delay 10'
 depends_on = ["_install-ui"]
+
+# =============================================
+# ================== TYPES ====================
+# =============================================
+[feature.type.dependencies]
+mypy = "*"
+pandas-stubs = "*"
+types-bleach = "*"
+types-croniter = "*"
+types-Markdown = "*"
+types-psutil = "*"
+types-requests = "*"
+types-tqdm = "*"
+typing-extensions = "*"
+
+[feature.type.tasks]
+test-type = 'mypy panel'
 
 # =============================================
 # =================== DOCS ====================
@@ -160,7 +188,7 @@ _docs-refmanual = 'python ./doc/generate_modules.py panel -d ./doc/api -n panel 
 _docs-convert-gallery = 'python scripts/gallery/convert_gallery.py'
 _docs-generate = 'nbsite build --what=html --output=builtdocs --org holoviz --project-name panel'
 _docs-copy-panel-dist = 'cp -r ./panel/dist ./builtdocs/panel_dist'
-_docs-pyodide = 'panel convert examples/gallery/*.ipynb doc/how_to/*/examples/*.md --to pyodide-worker --out ./builtdocs/pyodide/ --pwa --index --requirements doc/pyodide_dependencies.json'
+_docs-pyodide = 'panel convert examples/gallery/*.ipynb doc/how_to/*/examples/*.md --to pyodide-worker --out ./builtdocs/pyodide/ --pwa --index --requirements doc/pyodide_dependencies.json --exclude examples/gallery/vtk*.ipynb'
 docs-server = 'python -m http.server 5500 --directory ./builtdocs'
 
 [feature.doc.tasks.docs-build]
@@ -194,3 +222,18 @@ pre-commit = "*"
 [feature.lint.tasks]
 lint = 'pre-commit run --all-files'
 lint-install = 'pre-commit install'
+
+# =============================================
+# =================== LITE ====================
+# =============================================
+[feature.lite.dependencies]
+jupyterlab-myst = "*"
+jupyterlite-core = "*"
+jupyterlite-pyodide-kernel = "*"
+python-build = "*"
+
+[feature.lite.tasks]
+lite-build = "bash scripts/jupyterlite/build.sh"
+# Service worker only work on 127.0.0.1
+# https://jupyterlite.readthedocs.io/en/latest/howto/configure/advanced/service-worker.html#limitations
+lite-server = "python -m http.server --directory ./lite/dist --bind 127.0.0.1"

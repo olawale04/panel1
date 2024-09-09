@@ -32,7 +32,6 @@ import numpy as np
 import param
 
 from bokeh.models import ColumnDataSource, FixedTicker, Tooltip
-from bokeh.plotting import figure
 
 from .._param import Align
 from ..io.resources import CDN_DIST
@@ -520,7 +519,7 @@ class Gauge(ValueIndicator):
     def _process_param_change(self, msg):
         msg = super()._process_param_change(msg)
         vmin, vmax = msg.pop('bounds', self.bounds)
-        msg['data'] = {
+        msg['data'] = data = {
             'tooltip': {
                 'formatter': msg.pop('tooltip_format', self.tooltip_format)
             },
@@ -546,6 +545,13 @@ class Gauge(ValueIndicator):
                 }
             }]
         }
+        sm = self.sizing_mode
+        if 'stretch' in sm:
+            data['responsive'] = True
+            if 'width' in msg and ('both' in sm or 'width' in sm):
+                del msg['width']
+            if 'height' in msg  and ('both' in sm or 'height' in sm):
+                del msg['height']
         colors = msg.pop('colors', self.colors)
         if colors:
             msg['data']['series'][0]['axisLine']['lineStyle']['color'] = colors
@@ -730,6 +736,7 @@ class Dial(ValueIndicator):
         return annulus_data, needle_data, threshold_data, text_data
 
     def _get_model(self, doc, root=None, parent=None, comm=None):
+        from bokeh.plotting import figure
         properties = self._get_properties(doc)
         model = figure(
             x_range=(-1,1), y_range=(-1,1), tools=[],
@@ -946,6 +953,8 @@ class LinearGauge(ValueIndicator):
         )
 
     def _get_model(self, doc, root=None, parent=None, comm=None):
+        from bokeh.plotting import figure
+
         params = self._get_properties(doc)
         model = figure(
             outline_line_color=None, toolbar_location=None, tools=[],
