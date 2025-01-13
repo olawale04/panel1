@@ -39,7 +39,7 @@
 }
 
 .meta {
-  margin-bottom: -8px;
+  margin-bottom: -6px;
 }
 
 .left {
@@ -77,7 +77,6 @@
       1px;
   font-size: 1.25em;
   min-height: 50px;
-  margin-block: 2px;
   margin-left: 10px; /* Space for avatar */
   background-color: var(--panel-surface-color, #f1f1f1);
   min-width: 0;
@@ -86,7 +85,7 @@
   width: fit-content;
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: left;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -101,7 +100,7 @@
 .timestamp {
   opacity: 0.5;
   transition: opacity 0.1s ease-in-out;
-  margin-block: 0px;
+  margin-block: 2px;
 }
 
 .timestamp:hover {
@@ -119,6 +118,8 @@
 
 .icons {
   opacity: 0.5;
+  margin-left: 8px;
+  margin-top: -2px;
   transition: opacity 0.1s ease-in-out;
 }
 
@@ -147,11 +148,33 @@
   line-height: 0.9em;
 }
 
-.divider {
-  margin-right: 0px;
-  opacity: 0.2;
+.edit-icon {
+  margin-top: 4px;
+  margin-inline: 3px;
 }
 
-.copy-icon {
-  margin-left: 10px;
+.placeholder {
+  margin: 0;
+  width: calc(100% - 15px);
+}
+
+.edit-area {
+  /* for that smooth transition on a one line message */
+  height: 51.5px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+p {
+  overflow-wrap: break-word;
+}
+
+code {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
 }

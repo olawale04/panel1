@@ -1,6 +1,6 @@
-# Creating a `MarioButton` with `JSComponent`
+# Creating a `MarioButton` with `AnyWidgetComponent`
 
-In this tutorial we will build a *[Mario](https://mario.nintendo.com/) style button* with sounds and animations using the [`AnyWidgetComponent`](../../reference/custom/AnyWidgetComponent.md) feature in Panel. It aims to help you learn how to push the boundaries of what can be achieved with HoloViz Panel by creating advanced components using modern JavaScript and CSS technologies.
+In this tutorial we will build a *[Mario](https://mario.nintendo.com/) style button* with sounds and animations using the [`AnyWidgetComponent`](../../reference/custom_components/AnyWidgetComponent.md) feature in Panel. It aims to help you learn how to push the boundaries of what can be achieved with HoloViz Panel by creating advanced components using modern JavaScript and CSS technologies.
 
 ![Mario chime button](https://assets.holoviz.org/panel/tutorials/ipymario.gif)
 
@@ -202,7 +202,7 @@ Create a file named `mario_button.css`:
 To serve the application, run the following command in your terminal:
 
 ```sh
-panel serve mario_button.py --autoreload
+panel serve mario_button.py --dev
 ```
 
 This command will start a Panel server and automatically reload changes as you edit the files.
@@ -226,7 +226,7 @@ Try clicking the button to see the button bounce more slowly.
 
 ## Conclusion
 
-You've now created a custom `MarioButton` component using  [`AnyWidgetComponent`](../../reference/panes/AnyWidgetComponent.md) in HoloViz Panel. This button features a pixelated Mario icon, plays a chime sound when clicked, and has customizable parameters for gain, duration, size, and animation.
+You've now created a custom `MarioButton` component using  [`AnyWidgetComponent`](../../reference/custom_components/AnyWidgetComponent.md) in HoloViz Panel. This button features a pixelated Mario icon, plays a chime sound when clicked, and has customizable parameters for gain, duration, size, and animation.
 
 ## References
 
@@ -240,6 +240,6 @@ You've now created a custom `MarioButton` component using  [`AnyWidgetComponent`
 
 ### Reference Guides
 
-- [`AnyWidgetComponent`](../../reference/panes/AnyWidgetComponent.md)
-- [`JSComponent`](../../reference/panes/JSComponent.md)
-- [`ReactComponent`](../../reference/panes/ReactComponent.md)
+- [`AnyWidgetComponent`](../../reference/custom_components/AnyWidgetComponent.md)
+- [`JSComponent`](../../reference/custom_components/JSComponent.md)
+- [`ReactComponent`](../../reference/custom_components/ReactComponent.md)

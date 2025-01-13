@@ -1,21 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import uuid
 
 from functools import wraps
-from typing import TYPE_CHECKING, Mapping, cast
+from typing import TYPE_CHECKING, Any, cast
 
+from ..config import config
 from .application import build_applications
 from .document import _cleanup_doc, extra_socket_handlers
 from .resources import COMPONENT_PATH
-from .server import ComponentResourceHandler
+from .server import ComponentResourceHandler, server_html_page_for_session
 from .state import state
 from .threads import StoppableThread
 
 try:
     from bokeh_fastapi import BokehFastAPI
-    from bokeh_fastapi.handler import WSHandler
+    from bokeh_fastapi.handler import DocHandler, WSHandler
     from fastapi import (
         FastAPI, HTTPException, Query, Request,
     )
@@ -25,6 +27,9 @@ except ImportError:
     raise ImportError(msg) from None
 
 if TYPE_CHECKING:
+    from bokeh.application import Application as BkApplication
+    from bokeh.document.events import DocumentPatchedEvent
+    from bokeh.protocol.message import Message
     from uvicorn import Server
 
     from .application import TViewableFuncOrPath
@@ -34,7 +39,10 @@ if TYPE_CHECKING:
 # Private API
 #---------------------------------------------------------------------
 
-def dispatch_fastapi(conn, events=None, msg=None):
+DocHandler.render_session = server_html_page_for_session
+
+
+def dispatch_fastapi(conn, events: list[DocumentPatchedEvent] | None = None, msg: Message | None = None):
     if msg is None:
         msg = conn.protocol.create("PATCH-DOC", events)
     return [conn._socket.send_message(msg)]
@@ -42,7 +50,7 @@ def dispatch_fastapi(conn, events=None, msg=None):
 extra_socket_handlers[WSHandler] = dispatch_fastapi
 
 
-def add_liveness_handler(app, endpoint, applications):
+def add_liveness_handler(app, endpoint: str, applications: dict[str, BkApplication]):
     @app.get(endpoint, response_model=dict[str, bool])
     async def liveness_handler(request: Request, endpoint: str | None = Query(None)):
         if endpoint is not None:
@@ -61,16 +69,22 @@ def add_liveness_handler(app, endpoint, applications):
         else:
             return {str(request.url.path): True}
 
+def add_history_handler(app, endpoint):
+    @app.get(endpoint, response_model=dict[str, int | dict[str, Any]])
+    async def history_handler(request: Request):
+        return state.session_info
+
 #---------------------------------------------------------------------
 # Public API
 #---------------------------------------------------------------------
 
 def add_applications(
-    panel: TViewableFuncOrPath | Mapping[str, TViewableFuncOrPath],
+    panel: TViewableFuncOrPath | dict[str, TViewableFuncOrPath],
     app: FastAPI | None = None,
     title: str | dict[str, str] | None = None,
     location: bool | Location = True,
     admin: bool = False,
+    session_history: int | None = None,
     liveness: bool | str = False,
     **kwargs
 ):
@@ -92,6 +106,11 @@ def add_applications(
         set the URL location.
     admin: boolean (default=False)
         Whether to enable the admin panel
+    session_history: int (optional, default=None)
+      The amount of session history to accumulate. If set to non-zero
+      and non-None value will launch a REST endpoint at
+      /rest/session_info, which returns information about the session
+      history.
     liveness: bool | str (optional, default=False)
       Whether to add a liveness endpoint. If a string is provided
       then this will be used as the endpoint, otherwise the endpoint
@@ -100,7 +119,15 @@ def add_applications(
         Additional keyword arguments to pass to the BokehFastAPI application
     """
     apps = build_applications(panel, title=title, location=location, admin=admin)
+    ws_origins = kwargs.pop('websocket_origin', [])
+    if ws_origins and not isinstance(ws_origins, list):
+        ws_origins = [ws_origins]
+    kwargs['websocket_origins'] = ws_origins
+
     application = BokehFastAPI(apps, app=app, **kwargs)
+    if session_history is not None:
+        config.session_history = session_history
+        add_history_handler(application.app, endpoint='/session_info')
     if liveness:
         liveness_endpoint = liveness if isinstance(liveness, str) else '/liveness'
         add_liveness_handler(application.app, endpoint=liveness_endpoint, applications=apps)
@@ -163,8 +190,9 @@ def add_application(
 
 
 def get_server(
-    panel: TViewableFuncOrPath | Mapping[str, TViewableFuncOrPath],
+    panel: TViewableFuncOrPath | dict[str, TViewableFuncOrPath],
     port: int | None = 0,
+    show: bool = True,
     start: bool = False,
     title: str | dict[str, str] | None = None,
     location: bool | Location = True,
@@ -181,6 +209,8 @@ def get_server(
         dictionary mapping from the URL slug to either.
     port: int (optional, default=0)
       Allows specifying a specific port.
+    show : boolean (optional, default=True)
+      Whether to open the server in a new browser tab on start
     start : boolean(optional, default=False)
       Whether to start the Server.
     title : str or {str: str} (optional, default=None)
@@ -195,8 +225,11 @@ def get_server(
       Whether to add a liveness endpoint. If a string is provided
       then this will be used as the endpoint, otherwise the endpoint
       will be hosted at /liveness.
-    start : boolean(optional, default=False)
-      Whether to start the Server.
+    session_history: int (optional, default=None)
+      The amount of session history to accumulate. If set to non-zero
+      and non-None value will launch a REST endpoint at
+      /rest/session_info, which returns information about the session
+      history.
     **kwargs:
         Additional keyword arguments to pass to the BokehFastAPI application
     """
@@ -209,31 +242,55 @@ def get_server(
             "panel.io.fastapi.add_applications API."
         ) from e
 
+    address = kwargs.pop('address', None)
+    if not port:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(('127.0.0.1', 0))  # Bind to any available port
+        port = sock.getsockname()[1]  # Get the dynamically assigned port
+        sock.close()
+
     loop = kwargs.pop('loop')
+    config_kwargs = {}
     if loop:
+        config_kwargs['loop'] = loop
         asyncio.set_event_loop(loop)
+    if port:
+        config_kwargs['port'] = port
     server_id = kwargs.pop('server_id', uuid.uuid4().hex)
     application = add_applications(
         panel, title=title, location=location, admin=admin, **kwargs
     )
 
-    config = uvicorn.Config(application.app, port=port, loop=loop)
+    if show:
+        @application.app.on_event('startup')
+        def show_callback():
+            prefix = kwargs.get('prefix', '')
+            address_string = 'localhost'
+            if address is not None and address != '':
+                address_string = address
+            url = f"http://{address_string}:{config.port}{prefix}"
+            from bokeh.util.browser import view
+            view(url, new='tab')
+    config = uvicorn.Config(application.app, **config_kwargs)
     server = uvicorn.Server(config)
 
     state._servers[server_id] = (server, panel, [])
-    if start:
-        if loop:
-            try:
-                loop.run_until_complete(server.serve())
-            except asyncio.CancelledError:
-                pass
-        else:
-            server.run()
+    if not start:
+        return server
+
+    if loop:
+        try:
+            loop.run_until_complete(server.serve())
+        except asyncio.CancelledError:
+            pass
+    else:
+        server.run()
+
     return server
 
 
 def serve(
-    panels: TViewableFuncOrPath | Mapping[str, TViewableFuncOrPath],
+    panels: TViewableFuncOrPath | dict[str, TViewableFuncOrPath],
     port: int = 0,
     address: str | None = None,
     websocket_origin: str | list[str] | None = None,
@@ -241,10 +298,10 @@ def serve(
     show: bool = True,
     start: bool = True,
     title: str | None = None,
-    verbose: bool = True,
     location: bool = True,
     threaded: bool = False,
     admin: bool = False,
+    session_history: int | None = None,
     liveness: bool | str = False,
     **kwargs
 ) -> StoppableThread | Server:
@@ -283,8 +340,6 @@ def serve(
     title: str or {str: str} (optional, default=None)
       An HTML title for the application or a dictionary mapping
       from the URL slug to a customized title
-    verbose: boolean (optional, default=True)
-      Whether to print the address and port
     location : boolean or panel.io.location.Location
       Whether to create a Location component to observe and
       set the URL location.
@@ -296,6 +351,11 @@ def serve(
       Whether to add a liveness endpoint. If a string is provided
       then this will be used as the endpoint, otherwise the endpoint
       will be hosted at /liveness.
+    session_history: int (optional, default=None)
+      The amount of session history to accumulate. If set to non-zero
+      and non-None value will launch a REST endpoint at
+      /rest/session_info, which returns information about the session
+      history.
     kwargs: dict
       Additional keyword arguments to pass to Server instance
     """
@@ -303,8 +363,9 @@ def serve(
     # not relevant to Panel users.
     kwargs = dict(kwargs, **dict(
         port=port, address=address, websocket_origin=websocket_origin,
-        loop=loop, show=show, start=start, title=title, verbose=verbose,
-        location=location, admin=admin, liveness=liveness
+        loop=loop, show=show, start=start, title=title,
+        location=location, admin=admin, liveness=liveness,
+        session_history=session_history
     ))
     if threaded:
         # To ensure that we have correspondence between state._threads and state._servers

@@ -55,11 +55,6 @@ for e in os.environ:
     if e.startswith(('BOKEH_', "PANEL_")) and e not in ("PANEL_LOG_LEVEL", ):
         os.environ.pop(e, None)
 
-try:
-    asyncio.get_event_loop()
-except (RuntimeError, DeprecationWarning):
-    asyncio.set_event_loop(asyncio.new_event_loop())
-
 @cache
 def internet_available(host="8.8.8.8", port=53, timeout=3):
     """Check if the internet connection is available."""
@@ -68,7 +63,7 @@ def internet_available(host="8.8.8.8", port=53, timeout=3):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as conn:
             conn.connect((host, port))
         return True
-    except socket.error:
+    except OSError:
         return False
 
 def port_open(port):
@@ -144,7 +139,8 @@ def pytest_addoption(parser):
     for marker, info in optional_markers.items():
         parser.addoption(f"--{marker}", action="store_true",
                          default=False, help=info['help'])
-
+    parser.addoption('--repeat', action='store',
+        help='Number of times to repeat each test')
 
 def pytest_configure(config):
     for marker, info in optional_markers.items():
@@ -155,6 +151,20 @@ def pytest_configure(config):
 
     config.addinivalue_line("markers", "internet: mark test as requiring an internet connection")
 
+def pytest_generate_tests(metafunc):
+    repeat = getattr(metafunc.config.option, 'repeat', None)
+    if repeat is not None:
+        count = int(repeat)
+
+        # We're going to duplicate these tests by parametrizing them,
+        # which requires that each test has a fixture to accept the parameter.
+        # We can add a new fixture like so:
+        metafunc.fixturenames.append('tmp_ct')
+
+        # Now we parametrize. This is what happens when we do e.g.,
+        # @pytest.mark.parametrize('tmp_ct', range(count))
+        # def test_foo(): pass
+        metafunc.parametrize('tmp_ct', range(count))
 
 def pytest_collection_modifyitems(config, items):
     skipped, selected = [], []
@@ -225,6 +235,14 @@ def stop_event():
         yield event
     finally:
         event.set()
+
+@pytest.fixture
+def asyncio_loop():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(asyncio.new_event_loop())
+    yield
+    loop.stop()
+    loop.close()
 
 @pytest.fixture
 async def watch_files():
@@ -314,9 +332,8 @@ def tmpdir(request, tmpdir_factory):
     yield tmp_dir
     shutil.rmtree(str(tmp_dir))
 
-
-@pytest.fixture()
-def html_server_session():
+@pytest.fixture
+def html_server_session(asyncio_loop):
     port = 5050
     html = HTML('<h1>Title</h1>')
     server = serve(html, port=port, show=False, start=False)
@@ -330,7 +347,6 @@ def html_server_session():
         server.stop()
     except AssertionError:
         pass  # tests may already close this
-
 
 @pytest.fixture()
 def markdown_server_session():
@@ -350,7 +366,7 @@ def markdown_server_session():
 
 
 @pytest.fixture
-def multiple_apps_server_sessions(port):
+def multiple_apps_server_sessions(asyncio_loop, port):
     """Serve multiple apps and yield a factory to allow
     parameterizing the slugs and the titles."""
     servers = []
